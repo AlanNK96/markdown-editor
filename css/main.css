@@ -579,7 +579,16 @@ body {
 
     .panel-divider {
         width: auto;
-        height: 1px;
+        height: 3px;
+        margin: 4px 0;
+        background-image: linear-gradient(
+            to right,
+            transparent,
+            var(--color-border) 20%,
+            var(--color-border) 80%,
+            transparent
+        );
+        background-color: transparent;
     }
 
     .toolbar {

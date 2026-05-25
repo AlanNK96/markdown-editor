@@ -96,7 +96,7 @@ class Toolbar {
         const text = selection.text || '图片描述';
         const image = '![' + text + '](图片URL)';
         
-        this.editor.replaceSelection(image, 2); // 光标定位到描述处
+        this.editor.replaceSelection(image, 2 + text.length + 2);
     }
 
     /**

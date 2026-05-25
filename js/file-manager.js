@@ -30,6 +30,7 @@ class FileManager {
         setContent('');
         this.currentFileName = 'untitled.md';
         this.isModified = false;
+        this.clearDraft();
 
         return true;
     }

@@ -9,8 +9,9 @@ class MarkdownEditorApp {
         this.previewer = null;
         this.toolbar = null;
         this.fileManager = null;
-        this.viewMode = 'split'; // split, edit, preview
-        
+        this.viewMode = 'split';
+        this._syncScrolling = false;
+
         this.init();
     }
 
@@ -88,6 +89,9 @@ class MarkdownEditorApp {
 
         // 页面关闭前检查
         this.bindBeforeUnload();
+
+        // 同步滚动
+        this.bindSyncScroll();
     }
 
     /**
@@ -187,9 +191,36 @@ class MarkdownEditorApp {
         window.addEventListener('beforeunload', (e) => {
             if (this.fileManager.hasUnsavedChanges()) {
                 e.preventDefault();
-                e.returnValue = ''; // 现代浏览器会显示默认提示
+                e.returnValue = '';
             }
         });
+    }
+
+    bindSyncScroll() {
+        const textarea = this.editor.textarea;
+        const previewScroll = this.previewer.preview.parentElement;
+
+        const syncFromEditor = () => {
+            if (this._syncScrolling) return;
+            this._syncScrolling = true;
+            const maxTop = textarea.scrollHeight - textarea.clientHeight;
+            const ratio = maxTop > 0 ? textarea.scrollTop / maxTop : 0;
+            this.previewer.updateScroll(ratio);
+            requestAnimationFrame(() => { this._syncScrolling = false; });
+        };
+
+        const syncFromPreview = () => {
+            if (this._syncScrolling) return;
+            this._syncScrolling = true;
+            const maxTop = previewScroll.scrollHeight - previewScroll.clientHeight;
+            const ratio = maxTop > 0 ? previewScroll.scrollTop / maxTop : 0;
+            const editorMaxTop = textarea.scrollHeight - textarea.clientHeight;
+            textarea.scrollTop = editorMaxTop * ratio;
+            requestAnimationFrame(() => { this._syncScrolling = false; });
+        };
+
+        textarea.addEventListener('scroll', Utils.throttle(syncFromEditor, 16));
+        previewScroll.addEventListener('scroll', Utils.throttle(syncFromPreview, 16));
     }
 
     /**
@@ -209,7 +240,7 @@ class MarkdownEditorApp {
         
         const statsElement = document.getElementById('status-stats');
         if (statsElement) {
-            statsElement.textContent = `字符: ${stats.characters} | 行: ${stats.lines}`;
+            statsElement.textContent = `字符: ${stats.characters} | 词: ${stats.words} | 行: ${stats.lines}`;
         }
     }
 
@@ -254,6 +285,10 @@ class MarkdownEditorApp {
         );
 
         if (success) {
+            if (this.saveDraftTimer) {
+                clearTimeout(this.saveDraftTimer);
+                this.saveDraftTimer = null;
+            }
             this.updatePreview();
             this.updateStats();
             this.updateStatusBar();

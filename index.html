@@ -129,7 +129,7 @@
         </div>
         <div class="status-item">
             <div class="status-stats">
-                <span id="status-stats">字符: 0 | 行: 1</span>
+                <span id="status-stats">字符: 0 | 词: 0 | 行: 1</span>
             </div>
         </div>
     </div>
@@ -170,13 +170,9 @@
 
         var saved = null;
         try { saved = localStorage.getItem('md-editor-theme'); } catch(e) {}
-        if (saved === 'dark') {
-            setTheme(true);
-        } else if (saved === 'light') {
-            setTheme(false);
-        } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            setTheme(true);
-        }
+        var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var isDark = saved === 'dark' || (saved !== 'light' && prefersDark);
+        setTheme(isDark);
 
         themeBtn.addEventListener('click', function() {
             var isDark = document.documentElement.getAttribute('data-theme') === 'dark';

@@ -8,22 +8,28 @@ class Editor {
         this.textarea = textareaElement;
         this.onChange = null;
         this.onSelectionChange = null;
-        
+
+        this.history = [];
+        this.historyIndex = -1;
+        this.maxHistorySize = 50;
+        this._historyIgnore = false;
+        this._compoundActive = false;
+        this._compoundTimer = null;
+
         this.init();
     }
 
-    /**
-     * 初始化编辑器
-     */
     init() {
-        // 监听内容变化事件
+        this._pushHistory();
+
         this.textarea.addEventListener('input', () => {
+            if (this._historyIgnore) return;
+            this._recordInput();
             if (this.onChange) {
                 this.onChange(this.getText());
             }
         });
 
-        // 监听选中区域变化事件
         this.textarea.addEventListener('select', () => {
             if (this.onSelectionChange) {
                 this.onSelectionChange(this.getSelection());
@@ -31,6 +37,18 @@ class Editor {
         });
 
         this.textarea.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+                e.preventDefault();
+                this.undo();
+                return;
+            }
+
+            if ((e.ctrlKey || e.metaKey) && ((e.key === 'z' && e.shiftKey) || e.key === 'y')) {
+                e.preventDefault();
+                this.redo();
+                return;
+            }
+
             if (e.key === 'Tab') {
                 e.preventDefault();
                 this.insertTab();
@@ -42,41 +60,117 @@ class Editor {
         });
     }
 
-    /**
-     * 获取当前编辑内容
-     * @returns {String} 编辑器内容
-     */
+    _captureState() {
+        return {
+            content: this.textarea.value,
+            cursorStart: this.textarea.selectionStart,
+            cursorEnd: this.textarea.selectionEnd
+        };
+    }
+
+    _pushHistory() {
+        const snapshot = this._captureState();
+
+        if (this.historyIndex < this.history.length - 1) {
+            this.history = this.history.slice(0, this.historyIndex + 1);
+        }
+
+        this.history.push(snapshot);
+
+        while (this.history.length > this.maxHistorySize) {
+            this.history.shift();
+            this.historyIndex--;
+        }
+
+        this.historyIndex = this.history.length - 1;
+    }
+
+    _closeCompound() {
+        this._compoundActive = false;
+        if (this._compoundTimer) {
+            clearTimeout(this._compoundTimer);
+            this._compoundTimer = null;
+        }
+    }
+
+    _recordChange() {
+        this._closeCompound();
+        this._pushHistory();
+    }
+
+    _recordInput() {
+        if (this._compoundActive) {
+            this.history[this.historyIndex] = this._captureState();
+        } else {
+            this._pushHistory();
+            this._compoundActive = true;
+        }
+
+        clearTimeout(this._compoundTimer);
+        this._compoundTimer = setTimeout(() => {
+            this._compoundActive = false;
+        }, 500);
+    }
+
+    _restoreState(state) {
+        this._historyIgnore = true;
+        this.textarea.value = state.content;
+        this.textarea.setSelectionRange(state.cursorStart, state.cursorEnd);
+        if (this.onChange) {
+            this.onChange(state.content);
+        }
+        this._historyIgnore = false;
+    }
+
+    undo() {
+        if (this.historyIndex <= 0) return false;
+        this._closeCompound();
+        this.historyIndex--;
+        this._restoreState(this.history[this.historyIndex]);
+        return true;
+    }
+
+    redo() {
+        if (this.historyIndex >= this.history.length - 1) return false;
+        this._closeCompound();
+        this.historyIndex++;
+        this._restoreState(this.history[this.historyIndex]);
+        return true;
+    }
+
+    canUndo() {
+        return this.historyIndex > 0;
+    }
+
+    canRedo() {
+        return this.historyIndex < this.history.length - 1;
+    }
+
     getText() {
         return this.textarea.value;
     }
 
-    /**
-     * 设置编辑内容
-     * @param {String} content - 要设置的内容
-     */
     setText(content) {
+        this._closeCompound();
         this.textarea.value = content;
+        this._pushHistory();
         if (this.onChange) {
             this.onChange(content);
         }
     }
 
-    /**
-     * 在指定位置插入文本
-     * @param {String} text - 要插入的文本
-     * @param {Number} position - 插入位置（可选，默认为当前光标位置）
-     */
     insertText(text, position = null) {
         const pos = position !== null ? position : this.textarea.selectionStart;
         const before = this.textarea.value.substring(0, pos);
         const after = this.textarea.value.substring(pos);
         this.textarea.value = before + text + after;
-        
-        // 设置光标位置到插入文本之后
+
         const newPos = pos + text.length;
         this.textarea.setSelectionRange(newPos, newPos);
         this.textarea.focus();
-        
+
+        this._recordChange();
+
         if (this.onChange) {
             this.onChange(this.getText());
         }
@@ -137,10 +231,11 @@ class Editor {
         }
 
         if (isEmptyMarker) {
-            const deleteCount = currentLine.length;
-            this.textarea.value = value.substring(0, lineStart) + '\n' + after;
+            const trimmedAfter = after.startsWith('\n') ? after.substring(1) : after;
+            this.textarea.value = value.substring(0, lineStart) + '\n' + trimmedAfter;
             const newPos = lineStart + 1;
             this.textarea.setSelectionRange(newPos, newPos);
+            this._recordChange();
             if (this.onChange) {
                 this.onChange(this.getText());
             }
@@ -152,6 +247,7 @@ class Editor {
             this.textarea.value = before + insert + after;
             const newPos = pos + insert.length;
             this.textarea.setSelectionRange(newPos, newPos);
+            this._recordChange();
             if (this.onChange) {
                 this.onChange(this.getText());
             }
@@ -161,30 +257,25 @@ class Editor {
         return false;
     }
 
-    /**
-     * 插入 Tab 字符（转换为空格）
-     */
     insertTab() {
         const start = this.textarea.selectionStart;
         const end = this.textarea.selectionEnd;
-        const spaces = '    '; // 4 个空格
-        
+        const spaces = '    ';
+
         const before = this.textarea.value.substring(0, start);
         const after = this.textarea.value.substring(end);
         this.textarea.value = before + spaces + after;
-        
+
         const newPos = start + spaces.length;
         this.textarea.setSelectionRange(newPos, newPos);
-        
+
+        this._recordChange();
+
         if (this.onChange) {
             this.onChange(this.getText());
         }
     }
 
-    /**
-     * 获取当前选中的文本
-     * @returns {Object} 包含 text、start、end 的对象
-     */
     getSelection() {
         return {
             text: this.textarea.value.substring(
@@ -196,49 +287,35 @@ class Editor {
         };
     }
 
-    /**
-     * 替换选中的文本
-     * @param {String} text - 新文本
-     * @param {Number} cursorOffset - 光标偏移量（可选，默认为新文本长度）
-     */
     replaceSelection(text, cursorOffset = null) {
         const start = this.textarea.selectionStart;
         const end = this.textarea.selectionEnd;
         const before = this.textarea.value.substring(0, start);
         const after = this.textarea.value.substring(end);
-        
+
         this.textarea.value = before + text + after;
-        
-        // 设置光标位置
-        const newPos = cursorOffset !== null 
-            ? start + cursorOffset 
+
+        const newPos = cursorOffset !== null
+            ? start + cursorOffset
             : start + text.length;
         this.textarea.setSelectionRange(newPos, newPos);
         this.textarea.focus();
-        
+
+        this._recordChange();
+
         if (this.onChange) {
             this.onChange(this.getText());
         }
     }
 
-    /**
-     * 在选中文本周围包裹文本
-     * @param {String} prefix - 前缀
-     * @param {String} suffix - 后缀
-     * @param {String} placeholder - 占位符（当没有选中文本时使用）
-     */
     wrapSelection(prefix, suffix, placeholder = '') {
         const selection = this.getSelection();
         const text = selection.text || placeholder;
         const newText = prefix + text + suffix;
-        
+
         this.replaceSelection(newText, prefix.length + text.length);
     }
 
-    /**
-     * 获取光标位置
-     * @returns {Object} 包含 start 和 end 的对象
-     */
     getCursorPosition() {
         return {
             start: this.textarea.selectionStart,
@@ -246,72 +323,51 @@ class Editor {
         };
     }
 
-    /**
-     * 设置光标位置
-     * @param {Number} start - 起始位置
-     * @param {Number} end - 结束位置（可选，默认与 start 相同）
-     */
     setCursorPosition(start, end = null) {
         const endPos = end !== null ? end : start;
         this.textarea.setSelectionRange(start, endPos);
         this.textarea.focus();
     }
 
-    /**
-     * 获取当前行号和列号
-     * @returns {Object} 包含 line 和 column 的对象
-     */
     getLineColumn() {
         const pos = this.textarea.selectionStart;
         const text = this.textarea.value.substring(0, pos);
         const lines = text.split('\n');
-        
+
         return {
             line: lines.length,
             column: lines[lines.length - 1].length + 1
         };
     }
 
-    /**
-     * 清空编辑器
-     */
     clear() {
         this.setText('');
     }
 
-    /**
-     * 聚焦到编辑器
-     */
     focus() {
         this.textarea.focus();
     }
 
-    /**
-     * 插入行（在当前行的开头插入文本）
-     * @param {String} text - 要插入的文本
-     */
     insertAtLineStart(text) {
         const pos = this.textarea.selectionStart;
         const before = this.textarea.value.substring(0, pos);
-        const after = this.textarea.value.substring(pos);
-        
-        // 找到当前行的开始位置
+
         const lastNewline = before.lastIndexOf('\n');
         const lineStart = lastNewline === -1 ? 0 : lastNewline + 1;
-        
-        // 插入文本
-        const newValue = 
+
+        const newValue =
             this.textarea.value.substring(0, lineStart) +
             text +
             this.textarea.value.substring(lineStart);
-        
+
         this.textarea.value = newValue;
-        
-        // 调整光标位置
+
         const newPos = pos + text.length;
         this.textarea.setSelectionRange(newPos, newPos);
         this.textarea.focus();
-        
+
+        this._recordChange();
+
         if (this.onChange) {
             this.onChange(this.getText());
         }
